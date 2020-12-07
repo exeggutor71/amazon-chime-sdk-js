@@ -242,6 +242,12 @@ export class DemoMeetingApp implements
   // will be updated when the Amazon Voice Focus display state changes.
   voiceFocusDisplayables: HTMLElement[] = [];
   analyserNode: RemovableAnalyserNode;
+  private passcode: any;
+  private sessionMeetingId: string | null = null;
+  private sessionAttendeeId: string | null = null;
+  private instanceId: string;
+  private loadTestStartTime: string;
+  private loadTestSessionName: string;
 
   constructor() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -264,6 +270,56 @@ export class DemoMeetingApp implements
     } else {
       this.switchToFlow('flow-authenticate');
     }
+    const queryString = window.location.search;
+    const urlParams = new URLSearchParams(queryString);
+    // if(urlParams.has('Passcode')) {
+    //   this.passcode = JSON.parse(urlParams.get('Passcode'));
+    //   new AsyncScheduler().start(async () => {
+    //     this.joinInfo = (await this.getMeetingAttendeeJoinInfoUsingPasscode()).JoinInfo;
+    //
+    //   console.log(this.joinInfo);
+    //   console.log(this.joinInfo.Meeting);
+    //   console.log(this.joinInfo.Meeting.MeetingId);
+    //   console.log(this.joinInfo.Attendee);
+    //   console.log(this.joinInfo.Attendee.AttendeeId);
+    //   console.log(this.joinInfo?.Meeting?.MeetingId);
+    //   (document.getElementById('inputMeeting') as HTMLInputElement).value = this.joinInfo?.Meeting?.MeetingId;
+    //   (document.getElementById('inputName') as HTMLInputElement).value = this.joinInfo?.Attendee?.AttendeeId;
+    //   });
+    // }
+    if(urlParams.has('meetingInfo') && urlParams.has('attendeeInfo')) {
+      const meetingInfo = JSON.parse(urlParams.get('meetingInfo'));
+      const attendeeInfo = JSON.parse(urlParams.get('attendeeInfo'));
+      console.log(meetingInfo)
+      console.log(attendeeInfo)
+      this.sessionMeetingId = meetingInfo.MeetingId;
+      this.sessionAttendeeId = attendeeInfo.AttendeeId;
+      (document.getElementById('inputMeeting') as HTMLInputElement).value = this.sessionMeetingId;
+      (document.getElementById('inputName') as HTMLInputElement).value = this.sessionAttendeeId;
+    }
+
+    console.log(this.sessionMeetingId);
+    console.log(this.sessionAttendeeId);
+
+
+    this.instanceId = new URL(window.location.href).searchParams.get('instanceId');
+    this.loadTestStartTime = new URL(window.location.href).searchParams.get('loadTestStartTime');
+    this.loadTestSessionName = new URL(window.location.href).searchParams.get('loadTestSessionName');
+
+    console.log(this.instanceId, this.loadTestStartTime,  this.loadTestSessionName);
+    const timeToWaitMS = new URL(window.location.href).searchParams.get('timeToWaitMS');
+    const timeToWait = parseInt(timeToWaitMS, 10);
+    const meetingLeaveAfterMs = new URL(window.location.href).searchParams.get('meetingLeaveAfterMs');
+    const meetingLeaveAfter = parseInt(meetingLeaveAfterMs, 10);
+    setTimeout(() => {
+      document.getElementById('authenticate').click();
+      //this.sendStatus('MeetingJoin', 1);
+      //document.getElementById('authenticate').click();
+    }, timeToWait);
+
+    setTimeout(() => {
+      document.getElementById('button-meeting-leave').click();
+    }, meetingLeaveAfter);
   }
 
   initParameters(): void {
@@ -366,7 +422,13 @@ export class DemoMeetingApp implements
 
           await this.initVoiceFocus();
 
-          this.switchToFlow('flow-devices');
+          // this.switchToFlow('flow-devices');
+
+          await this.join();
+          this.audioVideo.chooseVideoInputDevice(null);
+          this.hideProgress('progress-join');
+          this.displayButtonStates();
+          this.switchToFlow('flow-meeting');
           await this.openAudioInputFromSelectionAndPreview();
           try {
             await this.openVideoInputFromSelection(
@@ -970,7 +1032,7 @@ export class DemoMeetingApp implements
     this.audioVideo = this.meetingSession.audioVideo;
 
     this.audioVideo.addDeviceChangeObserver(this);
-    this.setupDeviceLabelTrigger();
+    //this.setupDeviceLabelTrigger();
     await this.populateAllDeviceLists();
     this.setupMuteHandler();
     this.setupCanUnmuteHandler();
@@ -1223,6 +1285,35 @@ export class DemoMeetingApp implements
       throw new Error(`Server error: ${json.error}`);
     }
     return json;
+  }
+
+  async getMeetingAttendeeJoinInfoUsingPasscode(): Promise<any> {
+    const response = await fetch(
+      `${DemoMeetingApp.BASE_URL}joinChimeMeeting?Passcode=${this.passcode}&DisplayName=test`,
+      {
+        method: 'GET',
+      }
+    );
+    const json = await response.json();
+    console.log('json ', json);
+    if (json.error) {
+      throw new Error(`Server error: ${json.error}`);
+    }
+    return json;
+  }
+
+  async getMeetingAttendeeInfo(): Promise<any> {
+    const meetingInfo = new URL(window.location.href).searchParams.get('meetingInfo');
+    const attendeeInfo = new URL(window.location.href).searchParams.get('attendeeInfo');
+    console.log(meetingInfo)
+    console.log(attendeeInfo)
+    return {
+      JoinInfo:
+        {
+          Meeting: JSON.parse(meetingInfo),
+          Attendee: JSON.parse(attendeeInfo),
+        },
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1844,7 +1935,17 @@ export class DemoMeetingApp implements
   }
 
   async authenticate(): Promise<string> {
-    let joinInfo = (await this.joinMeeting()).JoinInfo;
+    let joinInfo = null;
+
+    // if(this.passcode !== null) {
+    //   joinInfo = this.joinInfo;
+    // } else if(this.sessionMeetingId !== null && this.sessionAttendeeId !== null) {
+    //
+      joinInfo = (await this.getMeetingAttendeeInfo()).JoinInfo;
+
+      console.log('joinInfo ', joinInfo);
+    // }
+    //console.log(this.getMeetingAttendeeJoinInfo());
     const configuration = new MeetingSessionConfiguration(joinInfo.Meeting, joinInfo.Attendee);
     await this.initializeMeetingSession(configuration);
     const url = new URL(window.location.href);
@@ -1863,6 +1964,7 @@ export class DemoMeetingApp implements
 
   audioVideoDidStart(): void {
     this.log('session started');
+    this.selectAudioInputDeviceByName('None');
   }
 
   audioVideoDidStop(sessionStatus: MeetingSessionStatus): void {
@@ -1909,7 +2011,7 @@ export class DemoMeetingApp implements
     this.audioVideo.bindVideoElement(tileState.tileId, videoElement);
     this.tileIndexToTileId[tileIndex] = tileState.tileId;
     this.tileIdToTileIndex[tileState.tileId] = tileIndex;
-    this.updateProperty(nameplateElement, 'innerText', tileState.boundExternalUserId.split('#')[1]);
+    this.updateProperty(nameplateElement, 'innerText', tileState.boundExternalUserId?.split('#')[1] || tileState.boundAttendeeId?.split('#')[1]);
     this.updateProperty(attendeeIdElement, 'innerText', tileState.boundAttendeeId);
     this.showTile(tileElement, tileState);
     this.updateGridClasses();

@@ -7,6 +7,7 @@ const fs = require('fs');
 const http = require('http');
 const url = require('url');
 const { v4: uuidv4 } = require('uuid');
+const fetch = require('node-fetch');
 
 // Store created meetings in a map so attendees can join by meeting title
 const meetingTable = {};
@@ -81,6 +82,49 @@ http.createServer({}, async (request, response) => {
           Attendee: attendee,
         },
       }, null, 2));
+    } else if (request.method === 'GET' && requestUrl.pathname === '/joinChimeMeeting') {
+      if (!requestUrl.query.Passcode && !requestUrl.query.DisplayName ) {
+        throw new Error('Need parameters: Passcode & Display Name');
+      }
+      const requestBody = JSON.stringify({ Passcode: requestUrl.query.Passcode,
+        DisplayName: requestUrl.query.DisplayName,
+        DeviceId: uuidv4(),
+        DevicePlatform: 'webclient'
+      });
+      try {
+        const response = await fetch('https://api.express.ue1.app.chime.aws/meetings/v2/anonymous/join_meeting', {
+          method: 'POST',
+          body: requestBody
+        });
+        const bodyJson = await response.json();
+        const result = {
+          Meeting: {
+            MeetingId: bodyJson.Meeting.JoinableMeeting.Id,
+            MediaPlacement: {
+              AudioHostUrl: bodyJson.Meeting.MediaPlacement.AudioDtlsUrl,
+              SignalingUrl: `${bodyJson.Meeting.MediaPlacement.SignalingUrl}/control/${bodyJson.Meeting.JoinableMeeting.Id}`,
+              TurnControlUrl: bodyJson.Meeting.MediaPlacement.TurnControlUrl,
+              ScreenDataUrl: bodyJson.Meeting.MediaPlacement.ScreenBrowserUrl,
+              ScreenViewingUrl: bodyJson.Meeting.MediaPlacement.ScreenBrowserUrl,
+              ScreenSharingUrl: bodyJson.Meeting.MediaPlacement.ScreenBrowserUrl,
+            }
+          },
+          Attendee: {
+            AttendeeId: bodyJson.Meeting.CurrentAttendee.ProfileId,
+            JoinToken: bodyJson.SessionToken,
+          }
+        };
+        // Return the meeting and attendee responses. The client will use these
+        // to join the meeting.
+        respond(response, 201, 'application/json', JSON.stringify({
+          JoinInfo: {
+            Meeting: result.Meeting,
+            Attendee: result.Attendee,
+          },
+        }, null, 2));
+      } catch (err ) {
+        console.log('Error while Fetching ', err)
+      }
     } else if (request.method === 'POST' && requestUrl.pathname === '/end') {
       // End the meeting. All attendee connections will hang up.
       await chime.deleteMeeting({
